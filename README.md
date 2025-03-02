@@ -1,2 +1,8 @@
 # fallen_detection
-a human body fallen detector based on mmpose  
+a human body fallen detector based on mmpose
+
+1.instaslll mmpose
+
+2.to realize a demo
+
+3.。。。
