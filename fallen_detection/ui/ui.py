@@ -134,6 +134,11 @@ class ModernWindow(QMainWindow):
             self.video_processor.quit()
             self.video_processor.wait()
             self.video_processor = None
+            # 确保视频处理器线程已经停止
+            # 恢复视频显示区域为初始状态
+        self.video_display.setPixmap(QPixmap())  # 清除当前显示的视频帧
+        self.video_display.setText("视频流显示区域")  # 恢复提示文字
+        self.video_display.setStyleSheet("background: #2D2D2D; border-radius: 10px;")  # 恢复背景样式
         self.status_led.setStyleSheet("color: #FF0000;")
 
 class StatItem(QLabel):
