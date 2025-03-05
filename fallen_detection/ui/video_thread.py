@@ -1,78 +1,124 @@
+# video_thread.py 修改后的完整代码
 import sys
 import os
 sys.path.append('../../../mmpose')
 import cv2
 from PyQt5.QtCore import QThread, pyqtSignal, QMutex
 from PyQt5.QtGui import QImage
+import numpy as np
+
+# MMPose相关导入
 from mmpose.apis import inference_topdown, init_model
 from mmpose.utils import register_all_modules
 from mmpose.visualization import PoseLocalVisualizer
-import torch
-import numpy as np
+from mmpose.structures import merge_data_samples
+
+# MMDetection相关导入
+from mmdet.apis import inference_detector, init_detector
+from mmengine.registry import init_default_scope
 
 class VideoProcessor(QThread):
     frame_processed = pyqtSignal(QImage)
     
-    def __init__(self, config_path, checkpoint_path):
+    def __init__(self, pose_config, pose_checkpoint, det_config, det_checkpoint):
         super().__init__()
-
-        # 增加检测模型初始化
-        self.det_config = '../../mmpose/configs/body_2d_keypoint/rtmpose/coco/rtmpose-l_8xb256-420e_aic-coco-256x192.py'
-        self.det_checkpoint = 'https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/rtmpose-l_simcc-body7_pt-body7_420e-256x192-4dba18fc_20230504.pth'
-        
-        # 初始化检测模型
-        self.det_model = init_model(
-            self.det_config, 
-            self.det_checkpoint,
-            device='cuda:0'
-        )
-
         self.mutex = QMutex()
         register_all_modules()
-        self.model = init_model(config_path, checkpoint_path, device='cuda:0')
+        
+        # 初始化检测模型（YOLOX示例，可按需更换）
+        self.detector = init_detector(
+            det_config,
+            det_checkpoint,
+            device='cuda:0'
+        )
+        
+        # 初始化姿态估计模型
+        self.pose_model = init_model(
+            pose_config,
+            pose_checkpoint,
+            device='cuda:0'
+        )
+        
+        # 初始化可视化工具
         self.visualizer = PoseLocalVisualizer()
-        if hasattr(self.model, 'dataset_meta'):
+        if hasattr(self.pose_model, 'dataset_meta'):
             self.visualizer.set_dataset_meta(
-                self.model.dataset_meta, skeleton_style='mmpose'
+                self.pose_model.dataset_meta, skeleton_style='mmpose'
             )
+        
         self.running = False
         self.cap = None
+        self.det_score_thr = 0.5  # 检测置信度阈值
+        self.nms_thr = 0.3       # NMS阈值
 
     def run(self):
         self.mutex.lock()
         self.running = True
         self.cap = cv2.VideoCapture(0)
-        # 设置摄像头的宽度和高度
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1200)  # 设置宽度
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720) # 设置高度
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1200)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
         self.mutex.unlock()
         
         try:
             while self.running:
                 ret, frame = self.cap.read()
-                if ret:
-                    results = inference_topdown(self.model, frame)
-                    
-                    # 可视化处理
-                    self.visualizer.add_datasample(
-                        'result',
-                        frame,
-                        data_sample=results[0],
-                        show=False,
-                        draw_gt=False,
-                        draw_bbox=True
+                if not ret:
+                    continue
+                
+                # Step 1: 人体检测
+                init_default_scope('mmdet')
+                det_result = inference_detector(self.detector, frame)
+                
+                # 过滤检测结果（假设检测类别0是人）
+                pred_instances = det_result.pred_instances.cpu().numpy()
+                bboxes = np.concatenate(
+                    (pred_instances.bboxes, pred_instances.scores[:, None]), axis=1)
+                valid_indices = np.where(
+                    (pred_instances.labels == 0) & 
+                    (pred_instances.scores > self.det_score_thr)
+                )[0]
+                bboxes = bboxes[valid_indices]
+                
+                # 应用NMS（非极大值抑制）
+                if len(bboxes) > 0:
+                    from mmpose.evaluation.functional import nms
+                    bboxes = bboxes[nms(bboxes, self.nms_thr)]
+                
+                # Step 2: 多人姿态估计
+                if len(bboxes) > 0:
+                    pose_results = inference_topdown(
+                        self.pose_model, 
+                        frame, 
+                        bboxes=bboxes[:, :4],  # 保留前四列坐标
+                        bbox_format='xyxy'
                     )
-                    vis_frame = self.visualizer.get_image()
-                    
-                    # 转换图像格式
-                    rgb_image = cv2.cvtColor(vis_frame, cv2.COLOR_BGR2RGB)
-                    h, w, ch = rgb_image.shape
-                    qt_image = QImage(
-                        rgb_image.data, 
-                        w, h, 
-                        QImage.Format.Format_RGB888
-                    )
-                    self.frame_processed.emit(qt_image)
+                    data_samples = merge_data_samples(pose_results)
+                else:
+                    data_samples = None
+                
+                # 可视化结果
+                self.visualizer.add_datasample(
+                    'result',
+                    frame,
+                    data_sample=data_samples,
+                    draw_gt=False,
+                    draw_bbox=True,
+                    draw_heatmap=False,
+                    show=False
+                )
+                
+                vis_frame = self.visualizer.get_image()
+                
+                # 转换图像格式
+                rgb_image = cv2.cvtColor(vis_frame, cv2.COLOR_BGR2RGB)
+                h, w, ch = rgb_image.shape
+                qt_image = QImage(
+                    rgb_image.data, 
+                    w, h, 
+                    QImage.Format.Format_RGB888
+                )
+                self.frame_processed.emit(qt_image)
+                
         finally:
             if self.cap and self.cap.isOpened():
                 self.cap.release()
