@@ -6,6 +6,10 @@ import cv2
 from PyQt5.QtCore import QThread, pyqtSignal, QMutex
 from PyQt5.QtGui import QImage
 import numpy as np
+from mmpose.structures import PoseDataSample
+from mmengine.structures import InstanceData
+
+
 
 # MMPose相关导入
 from mmpose.apis import inference_topdown, init_model
@@ -94,7 +98,10 @@ class VideoProcessor(QThread):
                     )
                     data_samples = merge_data_samples(pose_results)
                 else:
-                    data_samples = None
+                    # 创建空的数据样本避免None
+                    data_samples = PoseDataSample()
+                    data_samples.pred_instances = InstanceData()  # 确保包含pred_instances属性
+
                 
                 # 可视化结果
                 self.visualizer.add_datasample(
