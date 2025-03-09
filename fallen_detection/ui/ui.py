@@ -18,6 +18,7 @@ class ModernWindow(QMainWindow):
         self.apply_styles()
 
         self.video_processor = None  # 新增视频处理器
+        self.alarm_counter = 0  # 新增报警计数器
 
     def init_ui(self):
         # 主窗口布局
@@ -129,6 +130,7 @@ class ModernWindow(QMainWindow):
                 det_checkpoint='https://download.openmmlab.com/mmdetection/v2.0/faster_rcnn/faster_rcnn_r50_fpn_1x_coco/faster_rcnn_r50_fpn_1x_coco_20200130-047c8118.pth'
             )
             self.video_processor.frame_processed.connect(self.update_video_frame)
+            self.video_processor.fall_detected.connect(self.emit_alarm)  # 连接信号
         self.video_processor.start()
         self.status_led.setStyleSheet("color: #00FF00;")
 
@@ -144,6 +146,17 @@ class ModernWindow(QMainWindow):
         self.video_display.setText("视频流显示区域")  # 恢复提示文字
         self.video_display.setStyleSheet("background: #2D2D2D; border-radius: 10px;")  # 恢复背景样式
         self.status_led.setStyleSheet("color: #FF0000;")
+
+    def emit_alarm(self):
+        # 更新UI显示
+        self.status_led.setStyleSheet("color: #FF0000;")
+        self.camera_label.setText("警报！检测到摔倒！")
+        
+        # 更新统计信息
+        self.alarm_counter += 1
+        stats = self.findChild(QLabel, "stat_异常事件")
+        if stats:
+            stats.value_label.setText(str(self.alarm_counter))
 
 class StatItem(QLabel):
     def __init__(self, title, value):

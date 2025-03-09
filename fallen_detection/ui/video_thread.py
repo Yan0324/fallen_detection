@@ -8,26 +8,26 @@ from PyQt5.QtGui import QImage
 import numpy as np
 from mmpose.structures import PoseDataSample
 from mmengine.structures import InstanceData
-
-
-
 # MMPose相关导入
 from mmpose.apis import inference_topdown, init_model
 from mmpose.utils import register_all_modules
 from mmpose.visualization import PoseLocalVisualizer
 from mmpose.structures import merge_data_samples
-
 # MMDetection相关导入
 from mmdet.apis import inference_detector, init_detector
 from mmengine.registry import init_default_scope
+from fall_detection import FallDetection
 
 class VideoProcessor(QThread):
     frame_processed = pyqtSignal(QImage)
+    fall_detected = pyqtSignal()  # 新增信号
     
     def __init__(self, pose_config, pose_checkpoint, det_config, det_checkpoint):
         super().__init__()
         self.mutex = QMutex()
         register_all_modules()
+
+        
         
         # 初始化检测模型（YOLOX示例，可按需更换）
         self.detector = init_detector(
@@ -54,6 +54,7 @@ class VideoProcessor(QThread):
         self.cap = None
         self.det_score_thr = 0.5  # 检测置信度阈值
         self.nms_thr = 0.3       # NMS阈值
+        self.fall_detector = FallDetection()  # 初始化摔倒检测器
 
     def run(self):
         self.mutex.lock()
@@ -87,7 +88,6 @@ class VideoProcessor(QThread):
                 if len(bboxes) > 0:
                     from mmpose.evaluation.functional import nms
                     bboxes = bboxes[nms(bboxes, self.nms_thr)]
-                
                 # Step 2: 多人姿态估计
                 if len(bboxes) > 0:
                     pose_results = inference_topdown(
@@ -98,9 +98,10 @@ class VideoProcessor(QThread):
                     )
                     data_samples = merge_data_samples(pose_results)
                 else:
-                    # 创建空的数据样本避免None
+                    #创建空的数据样本避免None
                     data_samples = PoseDataSample()
                     data_samples.pred_instances = InstanceData()  # 确保包含pred_instances属性
+                    pose_results = []  # 初始化空列表
 
                 
                 # 可视化结果
@@ -115,6 +116,14 @@ class VideoProcessor(QThread):
                 )
                 
                 vis_frame = self.visualizer.get_image()
+
+                # if not pose_results or len(pose_results[0].pred_instances.keypoints) < 17:
+                #     continue
+
+                # 检测是否摔倒
+                if self.fall_detector.is_fall(pose_results):
+                    self.fall_detected.emit()  # 发射信号
+                    self.emit_alarm()
                 
                 # 转换图像格式
                 rgb_image = cv2.cvtColor(vis_frame, cv2.COLOR_BGR2RGB)
@@ -134,3 +143,11 @@ class VideoProcessor(QThread):
         self.mutex.lock()
         self.running = False
         self.mutex.unlock()
+    #报警函数
+    
+    def emit_alarm(self):
+        """
+        发出摔倒报警，这里可以是音频、UI警示或者其他方式
+        """
+        
+        print("警报！检测到摔倒！") 
