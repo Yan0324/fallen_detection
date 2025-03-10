@@ -27,7 +27,15 @@ class VideoProcessor(QThread):
         self.mutex = QMutex()
         register_all_modules()
 
-        
+        # 修改后的摔倒检测参数
+        self.fall_detector = FallDetection(
+            angle_threshold=45,
+            height_ratio_threshold=0.35,
+            head_hip_threshold=0.25,
+            aspect_ratio_threshold=2.0,
+            horizontal_threshold=0.12,
+            min_consecutive_frames=3
+        )
         
         # 初始化检测模型（YOLOX示例，可按需更换）
         self.detector = init_detector(
