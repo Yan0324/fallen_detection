@@ -20,7 +20,8 @@ from fall_detection import FallDetection
 
 class VideoProcessor(QThread):
     frame_processed = pyqtSignal(QImage)
-    fall_detected = pyqtSignal()  # 新增信号
+    fall_detected = pyqtSignal()  # 新增异常状态信号
+    normal_status = pyqtSignal()  # 新增正常状态信号
     
     def __init__(self, pose_config, pose_checkpoint, det_config, det_checkpoint):
         super().__init__()
@@ -29,12 +30,15 @@ class VideoProcessor(QThread):
 
         # 修改后的摔倒检测参数
         self.fall_detector = FallDetection(
-            angle_threshold=45,
-            height_ratio_threshold=0.35,
-            head_hip_threshold=0.25,
-            aspect_ratio_threshold=2.0,
-            horizontal_threshold=0.12,
-            min_consecutive_frames=3
+            angle_threshold=50,
+            height_ratio_threshold=0.3,
+            min_confidence=0.4,
+            head_hip_threshold=0.2,
+            aspect_ratio_threshold=2.2,
+            horizontal_threshold=0.1,
+            velocity_threshold=0.05,
+            min_consecutive_frames=5,
+            history_size=10
         )
         
         # 初始化检测模型（YOLOX示例，可按需更换）
@@ -132,6 +136,8 @@ class VideoProcessor(QThread):
                 if self.fall_detector.is_fall(pose_results):
                     self.fall_detected.emit()  # 发射信号
                     self.emit_alarm()
+                else:
+                    self.normal_status.emit()  # 发送正常状态信号
                 
                 # 转换图像格式
                 rgb_image = cv2.cvtColor(vis_frame, cv2.COLOR_BGR2RGB)
